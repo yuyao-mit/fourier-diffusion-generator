@@ -1,0 +1,17 @@
+batch_size: 32
+high_res: 240
+hr_hidc: 32
+jitter_std: 0.001
+lr: 0.0001
+lr_hidc: 32
+mlpc: 64
+num_workers: 4
+r_list:
+- 2
+- 4
+- 6
+- 8
+- 12
+root_dir: /home/gridsan/yyao/Research_Projects/Microstructure_Enough/deepfaker/dataset/raw
+seed: 42
+weight_decay: 1.0e-06
