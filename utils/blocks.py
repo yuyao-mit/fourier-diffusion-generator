@@ -110,13 +110,37 @@ class ResidualDenseBlock_5C(nn.Module):
         x3 = self.lrelu(self.conv3(torch.cat((x, x1, x2), 1)))
         x4 = self.lrelu(self.conv4(torch.cat((x, x1, x2, x3), 1)))
         x5 = self.conv5(torch.cat((x, x1, x2, x3, x4), 1))
-        return x5 * 0.2 + x
+        # original output: return x5 * 0.2 + x
+        return x5
+
+class ScalableRDB(nn.Module):
+    """
+    ResidualDenseBlock_5C with learnt scalable g factor.
+    """
+    def __init__(self,nf=64,gc=32,bias=True):
+        super().__init__()
+        self.g_RDB = Rezero(fn=ResidualDenseBlock_5C(nf,gc,bias))
+
+    def forward(self,x):
+        return self.g_RDB(x)
+
+class FixedRDB(nn.Module):
+    """
+    ResidualDenseBlock_5C with fixed scalable g factor.
+    """
+    def __init__(self,nf=64,gc=32,bias=True):
+        super().__init__()
+        self.block = ResidualDenseBlock_5C(nf,gc,bias)
+
+    def forward(self,x):
+        return x + 0.2*self.block(x)
+    
 
 class RRDB(nn.Module):
     def __init__(self, nf, gc=32, num_blocks=3):
         super().__init__()
         self.blocks = nn.Sequential(*[
-            ResidualDenseBlock_5C(nf, gc) for _ in range(num_blocks)
+            FixedRDB(nf, gc) for _ in range(num_blocks)
         ])
 
     def forward(self, x):
@@ -201,8 +225,7 @@ class RBlock(nn.Module):
 
 class CALayer(nn.Module):
     """
-    Channel Attention Layer
-    From "Squeeze-and-Excitation Networks" 
+    Channel Attention Layer From "Squeeze-and-Excitation Networks" 
     https://arxiv.org/abs/1709.01507    
     """
     def __init__(self, channel, reduction=16):

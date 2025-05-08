@@ -37,8 +37,8 @@ class _GetFourier(Dataset):
         if not self.img_paths:
             raise FileNotFoundError(f"No images found in {root_dir}")
 
-        # 下方 100 行用于 label，假设原图尺寸 1600×1600
-        self.y_max, self.x_max = 1600 - res - 100, 1600 - res
+        # 下方 100 行用于 label，假设原图尺寸 1700×1600
+        self.y_max, self.x_max = 1700 - res - 100, 1600 - res
 
     # ---------------------------------------------------------- #
     def __len__(self) -> int:
@@ -51,7 +51,6 @@ class _GetFourier(Dataset):
         if im is None:
             raise RuntimeError(f"Cannot open image: {path}")
 
-        # 若为彩色，转灰度
         if im.ndim == 3:
             im = cv.cvtColor(im, cv.COLOR_BGR2GRAY)
 
@@ -61,7 +60,7 @@ class _GetFourier(Dataset):
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         img_np = self._read_gray(self.img_paths[idx])                # [H, W] float64
 
-        # label: 取图像底部 100×1600
+        # label: 100×1600
         label_np = img_np[-100:, :][None, None, ...]                 # [1,1,100,1600]
 
         mags, phases = [], []
@@ -80,7 +79,7 @@ class _GetFourier(Dataset):
                 pha = np.angle(fft_shifted)                          # [-π, π]
                 phases.append(pha[None, ...])                        # [1, res, res]
 
-        # 组装 batch 并转 Torch Tensor (float64 保精度)
+        # 组装 batch (float64 保精度)
         freq = torch.from_numpy(np.stack(mags, axis=0))              # [n,1,res,res]
         label = torch.from_numpy(label_np)
         phase = (
@@ -100,7 +99,7 @@ class FourierNanoDataModule(L.LightningDataModule):
         res: int = 256,
         n_patches: int = 16,
         batch_size: int = 1,
-        num_workers: int = 8,
+        num_workers: int = 6,
         val_split: float = 0.1,
         seed: int = 42,
         return_phase: bool = False,
