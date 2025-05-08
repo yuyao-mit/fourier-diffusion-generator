@@ -15,17 +15,17 @@ from loss import CombinatorialLoss
 
 
 class DFSR(nn.Module):
-    """Deep Fourier Based Super Resolution"""
-    def __init__(self, is_train, lr_hidc=32, hr_hidc=32, mlpc=64, jitter_std=0.001):
+    """Deep Fourier Based Diffuison Generator"""
+    目的是把phase和amplitude 分开处理，然后通过feature fusion融合到一起
+    label单独处理
+    def __init__(self, phase_hidc=32, amplitude_hidc=32, mlpc=64):
         super(DFSR, self).__init__()
         self.is_train = is_train
         self.jitter_std = jitter_std
-        self.curExtraction = FeatureExtraction(3, lr_hidc * 2, is_train, midc=[32, 48, 48], num_blocks=4, need_RG=False)
+        self.PhaseExtraction = FeatureExtraction(1, lr_hidc * 2, is_train, midc=[32, 48, 48], num_blocks=4, need_RG=False)
 
-        r = 4 if config.Pixelshuffle else 1
-        # self.r = torch.tensor(r, dtype=torch.float32)
 
-        self.gbufferConv = nn.Sequential(
+        self.gbufferLabel = nn.Sequential(
             nn.Conv2d((10 - 3 + 1) * r, 64, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             doubleResidualConv(64),

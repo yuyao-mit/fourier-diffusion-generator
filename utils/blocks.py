@@ -110,118 +110,41 @@ class ResidualDenseBlock_5C(nn.Module):
         x3 = self.lrelu(self.conv3(torch.cat((x, x1, x2), 1)))
         x4 = self.lrelu(self.conv4(torch.cat((x, x1, x2, x3), 1)))
         x5 = self.conv5(torch.cat((x, x1, x2, x3, x4), 1))
-        # original output: return x5 * 0.2 + x
-        return x5
+        return x5 * 0.2 + x
 
 class ScalableRDB(nn.Module):
     """
     ResidualDenseBlock_5C with learnt scalable g factor.
     """
-    def __init__(self,nf=64,gc=32,bias=True):
-        super().__init__()
-        self.g_RDB = Rezero(fn=ResidualDenseBlock_5C(nf,gc,bias))
+    def __init__(self, nf=64, gc=32, bias=True):
+        super(ResidualDenseBlock_5C, self).__init__()
+        # gc: growth channel, i.e. intermediate channels
+        self.conv1 = nn.Conv2d(nf, gc, 3, 1, 1, bias=bias)
+        self.conv2 = nn.Conv2d(nf + gc, gc, 3, 1, 1, bias=bias)
+        self.conv3 = nn.Conv2d(nf + 2 * gc, gc, 3, 1, 1, bias=bias)
+        self.conv4 = nn.Conv2d(nf + 3 * gc, gc, 3, 1, 1, bias=bias)
+        self.conv5 = nn.Conv2d(nf + 4 * gc, nf, 3, 1, 1, bias=bias)
+        self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+        self.g = nn.Parameter(torch.zeros(1))  
 
-    def forward(self,x):
-        return self.g_RDB(x)
+    def forward(self, x):
+        x1 = self.lrelu(self.conv1(x))
+        x2 = self.lrelu(self.conv2(torch.cat((x, x1), 1)))
+        x3 = self.lrelu(self.conv3(torch.cat((x, x1, x2), 1)))
+        x4 = self.lrelu(self.conv4(torch.cat((x, x1, x2, x3), 1)))
+        x5 = self.conv5(torch.cat((x, x1, x2, x3, x4), 1))
+        return g * x5 + x
 
-class FixedRDB(nn.Module):
-    """
-    ResidualDenseBlock_5C with fixed scalable g factor.
-    """
-    def __init__(self,nf=64,gc=32,bias=True):
-        super().__init__()
-        self.block = ResidualDenseBlock_5C(nf,gc,bias)
-
-    def forward(self,x):
-        return x + 0.2*self.block(x)
-    
 
 class RRDB(nn.Module):
     def __init__(self, nf, gc=32, num_blocks=3):
         super().__init__()
         self.blocks = nn.Sequential(*[
-            FixedRDB(nf, gc) for _ in range(num_blocks)
+            ResidualDenseBlock_5C(nf, gc) for _ in range(num_blocks)
         ])
 
     def forward(self, x):
-        return self.blocks(x) * 0.2 + x
-
-
-###### Inspired by "Towards Real-Time 4K Image Super-Resolution" ########
-################# https://github.com/eduardzamfir/RT4KSR ################
-
-class ResBlock(nn.Module):
-    """ Residual in residual reparameterizable block.
-    Using reparameterizable block to replace single 3x3 convolution.
-    Diagram:
-        ---Conv1x1--Conv3x3-+-Conv1x1--+--
-                   |________|
-         |_____________________________|
-    Args:
-        n_feats (int): The number of feature maps.
-        ratio (int): Expand ratio.
-    """
-
-    def __init__(self, n_feats, ratio=2):
-        super(ResBlock, self).__init__()
-        self.expand_conv = nn.Conv2d(n_feats, int(ratio*n_feats), 1, 1, 0)
-        self.fea_conv = nn.Conv2d(int(ratio*n_feats), int(ratio*n_feats), 3, 1, 0)
-        self.reduce_conv = nn.Conv2d(int(ratio*n_feats), n_feats, 1, 1, 0)
-
-    def forward(self, x):
-        out = self.expand_conv(x)
-        out_identity = out
-        
-        # explicitly padding with bias for reparameterizing in the test phase
-        b0 = self.expand_conv.bias
-        out = pad_tensor(out, b0)
-
-        out = self.fea_conv(out) + out_identity
-        out = self.reduce_conv(out)
-        out += x
-
-        return  out
-
-class RepResBlock(nn.Module):
-    def __init__(self, n_feats):
-        super(RepResBlock, self).__init__()
-        self.rep_conv = nn.Conv2d(n_feats, n_feats, 3, 1, 1)
-
-    def forward(self, x):
-        out = self.rep_conv(x)
-        return out + x
-
-class RBlock(nn.Module):
-    def __init__(self,in_c,is_train=True,act='gelu') -> None:
-        super(RBlock,self).__init__()
-        
-        if is_train:
-            self.conv1 = ResBlock(in_c)
-        else:
-            self.conv1 = RepResBlock(in_c)
-        
-        # activation
-        if act=='gelu':
-            self.act = nn.GELU()
-        elif act=='relu':
-            self.act = nn.ReLU(inplace=True)
-        elif act=='softmax':
-            self.act = nn.Softmax(dim=1)
-        elif act=='softmax2d':
-            self.act = nn.Softmax2d()
-        elif act=='sigmoid':
-            self.act = nn.Sigmoid()
-        elif act=='tanh':
-            self.act = nn.Tanh()
-        elif act=='lrelu':
-            self.act=nn.LeakyReLU(0.2)
-        else:
-            print(act+'is NOT implemented in RBlock')
-            assert(0)
-        
-    def forward(self, x):
-        return x+self.act(self.conv1(x))
-    
+        return self.blocks(x) * 0.2 + x    
 
 class CALayer(nn.Module):
     """
@@ -320,14 +243,12 @@ class FeatureExtraction(nn.Module):
     Args:
         inc (int): Input channels.
         outc (int): Output channels.
-        is_train (bool): If True, use ResidualGroups.
-        act (str): Activation function type ('relu', 'gelu', etc.).
         midc (List[int]): Mid-layer channel dimensions.
         num_blocks (int): Number of intermediate blocks.
         need_RG (bool): Use ResidualGroups or not.
         need_lwg (bool): Use LWGatedConv2D or standard convs.
     """
-    def __init__(self, inc, outc, is_train, act='relu',
+    def __init__(self, inc, outc,
                  midc=[32, 32, 32], num_blocks=3,
                  need_RG=True, need_lwg=True,
                  kernel_size=3, padding=1):
@@ -335,18 +256,9 @@ class FeatureExtraction(nn.Module):
 
         netlist = []
 
-        # Activation selector
-        activation_dict = {
-            'gelu': nn.GELU(),
-            'relu': nn.ReLU(inplace=True),
-            'softmax': nn.Softmax(dim=1),
-            'softmax2d': nn.Softmax2d(),
-            'sigmoid': nn.Sigmoid(),
-            'tanh': nn.Tanh(),
-            'lrelu': nn.LeakyReLU(0.2)
-        }
-        if act not in activation_dict:
-            raise ValueError(f"Activation '{act}' is NOT implemented in FeatureExtraction.")
+        act_1 = nn.ReLU(inplace=True)
+        act_2 = nn.GELU()
+        act_3 = nn.LeakyReLU(0.2)
 
         if need_RG:
             netlist.append(nn.Conv2d(inc, midc[0], kernel_size=1, padding=0))
@@ -374,6 +286,7 @@ class FeatureExtraction(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
 
 
 
